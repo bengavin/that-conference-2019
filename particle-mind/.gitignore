@@ -1,0 +1,8 @@
+# Don't want .bin (firmware) files
+**/*.bin
+
+# Precompiled header files...
+.vscode/ipch/**
+
+# Any target (compiled) files
+target/**

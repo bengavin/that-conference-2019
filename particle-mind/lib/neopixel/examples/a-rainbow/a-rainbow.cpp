@@ -1,8 +1,18 @@
-/*
- * Project particle-mind
- * Description: The main source file for the 'Particle Mind' client
- * Author: Ben Gavin <ben@virtual-olympus.com>
- * Date: 2019-06-01
+/**
+ * This is a minimal example, see extra-examples.cpp for a version
+ * with more explantory documentation, example routines, how to
+ * hook up your pixels and all of the pixel types that are supported.
+ *
+ * On Photon, Electron, P1, Core and Duo, any pin can be used for Neopixel.
+ *
+ * On the Argon, Boron and Xenon, only these pins can be used for Neopixel:
+ * - D2, D3, A4, A5
+ * - D4, D6, D7, D8
+ * - A0, A1, A2, A3
+ *
+ * In addition on the Argon/Boron/Xenon, only one pin per group can be used at a time.
+ * So it's OK to have one Adafruit_NeoPixel instance on pin D2 and another one on pin
+ * A2, but it's not possible to have one on pin A0 and another one on pin A1.
  */
 
 #include "Particle.h"
@@ -12,35 +22,23 @@ SYSTEM_MODE(AUTOMATIC);
 
 // IMPORTANT: Set pixel COUNT, PIN and TYPE
 #define PIXEL_PIN D2
-#define PIXEL_COUNT 4
+#define PIXEL_COUNT 10
 #define PIXEL_TYPE WS2812B
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
-int indicatorPinState = LOW;
 
 // Prototypes for local build, ok to leave in for Build IDE
 void rainbow(uint8_t wait);
 uint32_t Wheel(byte WheelPos);
 
-// setup() runs once, when the device is first turned on.
-void setup() {
-  // Put initialization like pinMode and begin functions here.
+void setup()
+{
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
-
-  // Setup the indicator LED (sits on D7, resides next to the USB port)
-  pinMode(D7, OUTPUT);
-  digitalWrite(D7, LOW);
 }
 
-// loop() runs over and over again, as quickly as it can execute.
-void loop() {
-  indicatorPinState = indicatorPinState == HIGH ? LOW : HIGH;
-
-  digitalWrite(D7, indicatorPinState);
-  delay(1000);
-
-  // The core of your code will likely live here.
+void loop()
+{
   rainbow(20);
 }
 
