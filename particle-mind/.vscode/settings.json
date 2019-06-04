@@ -4,8 +4,8 @@
     "files.associations": {
         "*.ino": "cpp"
     },
-    "particle.targetDevice": "home_gateway",
+    "particle.targetDevice": "particle-mind-1",
     "particle.firmwareVersion": "1.1.0",
-    "particle.targetPlatform": "argon",
+    "particle.targetPlatform": "xenon",
     "cortex-debug.openocdPath": "C:\\Users\\BGavin\\.particle\\toolchains\\openocd\\0.10.0-particle.1\\bin\\openocd.exe"
 }
