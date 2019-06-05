@@ -6,3 +6,7 @@
 
 # Any target (compiled) files
 target/**
+
+# Any local key files
+**/*.pem
+**/*.der
