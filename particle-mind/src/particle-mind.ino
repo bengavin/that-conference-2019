@@ -113,7 +113,8 @@ typedef enum _GameState {
   STATE_SERVER_SET_PATTERN,
   STATE_SERVER_CONFIRM_PATTERN,
   STATE_SERVER_WAIT_FOR_GUESSES,
-  STATE_SERVER_GAME_COMPLETE
+  STATE_SERVER_GAME_COMPLETE,
+  STATE_SERVER_SHOW_WIN_PATTERN
 } GameState;
 
 // TODO: Replace this with something that asks for the game ready event
@@ -149,6 +150,7 @@ void setup() {
   #else
   Mesh.subscribe("game-started", processGameStartedEvent);
   Mesh.subscribe("guess-submission-result", processGuessSubmissionResult);
+  //TODO: Mesh.subscribe("game-complete", processGameCompleteEvent);
   #endif
   
   // Indicate Setup is complete (with light pattern)
@@ -210,11 +212,7 @@ void updateServerGameState() {
       if (changeColorButtonClicked || changeIndexButtonClicked) {
         // We always start with the first item
         currentGuessIndex = 0;
-        if (numberOfGuesses == 0) {
-          // We've never received a guess before, so let's assume they 
-          // want to start with the first peg color
-          currentGuessColors[currentGuessIndex] = 0;
-        }
+        currentGuessColors[currentGuessIndex] = 0;
         blinkTimer = 0;
 
         // Move into setting up the pattern
@@ -241,7 +239,7 @@ void updateServerGameState() {
 
         break;
 
-      case STATE_SERVER_CONFIRM_PATTERN:
+    case STATE_SERVER_CONFIRM_PATTERN:
         if (changeColorButtonClicked) {
           changeColorButtonClicked = false;
 
@@ -260,13 +258,38 @@ void updateServerGameState() {
 
         break;
 
-      case STATE_SERVER_WAIT_FOR_GUESSES:
+    case STATE_SERVER_WAIT_FOR_GUESSES:
         // We're just waiting... nothing fancy...
+        break;
+
+    case STATE_SERVER_GAME_COMPLETE:
+    case STATE_SERVER_SHOW_WIN_PATTERN:
+        if (changeColorButtonClicked) {
+          changeColorButtonClicked = false;
+
+          // Show the pattern matched
+          blinkTimer = 0;
+          currentGameState = STATE_SERVER_SHOW_WIN_PATTERN;
+        }
+        else if (changeIndexButtonClicked) {
+          changeIndexButtonClicked = false;
+
+          // Start a new game
+          Mesh.publish("game-reset");
+          // Reset Currently Selected Pattern Information
+          for (int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
+            currentGuessColors[i] = PEG_NONE;
+          }
+          numberOfGuesses = 0;
+          currentGameState = STATE_SERVER_SET_PATTERN;
+        }
+
         break;
   }
 }
 
-void updateGameState() {
+void updateGameState() 
+{
   // Here, we update game state depending on what we were doing
   // and the possible actions we might take during that phase
   switch (currentGameState) {
@@ -383,6 +406,7 @@ void renderGameState() {
   // Step the rainbow
   switch (currentGameState) {
     case STATE_GAME_START:
+    case STATE_SERVER_GAME_COMPLETE:
       // Taste the rainbow while you wait...
       rainbow(50);
       break;
@@ -392,6 +416,7 @@ void renderGameState() {
     case STATE_CONFIRM_GUESS:
     case STATE_SERVER_SET_PATTERN:
     case STATE_SERVER_CONFIRM_PATTERN:
+    case STATE_SERVER_SHOW_WIN_PATTERN:
       // These two states are rendered identically
       for(int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
         uint32_t currentGuessColor = currentGuessColors[i] == PEG_NONE ? COLOR_BLACK : pegColors[currentGuessColors[i]];
@@ -438,11 +463,64 @@ void setButtonIndicator(ClickButton button, uint16_t indicatorPin) {
 
 void processGameSubmissionEvent(const char *event, const char *data)
 {
-  // TODO: Grade the submission (format is <submitter>::<peg1><peg2><peg3><peg4><peg5>)
+  // Grade the submission (format is <submitter>::<peg1><peg2><peg3><peg4><peg5>)
   // NOTE: Assumption is color indexes are the same between client and server
+  int colorMatches = 0;
+  int fullMatches = 0;
+  String submission(data);
 
-  // TODO: Fire an event to the sending submitter (name encoded in response)
-  // TODO: Response format <submitter>::<color+position matches><color matches>
+  int delimiterIndex = submission.indexOf("::");
+  if (delimiterIndex > 0)
+  {
+    int pegCount = submission.length() - (delimiterIndex+1);
+    String submitter = submission.substring(0, delimiterIndex - 1);
+
+    if (pegCount != MAX_GUESS_ELEMENTS)
+    {
+      // Send error response
+      Mesh.publish("guess-submission-result", String::format("%s::error,wrong-number-elements", submitter));
+    }
+    else
+    {
+      numberOfGuesses++;
+
+      // Do the matching
+      int submissionIndex = delimiterIndex + 2;
+      for(int i = 0; i < MAX_GUESS_ELEMENTS; i++) 
+      {
+        int submissionVal = submission.substring(submissionIndex + i, 1).toInt();
+        if (submissionVal == currentGuessColors[i]) 
+        {
+          fullMatches++;
+        }
+        else
+        {
+          for(int j = 0; j < MAX_GUESS_ELEMENTS; j++)
+          {
+            if (submissionVal == currentGuessColors[j])
+            {
+              colorMatches++;
+              break;
+            }
+          }
+        }
+      }
+
+      if (fullMatches == MAX_GUESS_ELEMENTS) 
+      {
+        // WE HAVE A WINNER!!!
+        currentGameState = STATE_SERVER_GAME_COMPLETE;
+        Mesh.publish("guess-submission-result", String::format("%s::winner", submitter));
+        Mesh.publish("game-complete");
+      }
+      else
+      {
+        // Send the match response
+        Mesh.publish("guess-submission-result", String::format("%s::partial,%i,%i", submitter, fullMatches, colorMatches));
+      }
+    }
+    
+  }
 }
 
 void processGameStartedEvent(const char *event, const char *data)
