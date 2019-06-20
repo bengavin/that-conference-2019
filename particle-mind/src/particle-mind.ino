@@ -58,6 +58,7 @@ const char *getEncodedGuess();
 void processGameSubmissionEvent(const char *, const char *);
 void processGameStartedEvent(const char *, const char *);
 void processGuessSubmissionResult(const char *, const char *);
+void processGameCompleteEvent(const char *, const char *);
 
 #define COLOR_BLACK 0x00000000
 
@@ -94,6 +95,8 @@ const uint32_t pegColors[PEG_COLORS] = { COLOR_GREEN, COLOR_BLUE, COLOR_PURPLE, 
 
 // Information about our guesses so far
 short currentGuessColors[MAX_GUESS_ELEMENTS] = { PEG_NONE, PEG_NONE, PEG_NONE, PEG_NONE, PEG_NONE };
+uint32_t currentGuessResult[MAX_GUESS_ELEMENTS] = { COLOR_BLACK, COLOR_BLACK, COLOR_BLACK, COLOR_BLACK, COLOR_BLACK };
+
 int numberOfGuesses = 0;
 elapsedMillis blinkTimer(0);
 #define BLINK_CYCLE_TIME 3000
@@ -110,6 +113,8 @@ typedef enum _GameState {
   STATE_CONFIRM_GUESS,
   STATE_SUBMIT_GUESS,
   STATE_SHOW_GUESS_RESULT,
+  STATE_GAME_COMPLETE,
+  STATE_GAME_COMPLETE_WINNER,
   STATE_SERVER_SET_PATTERN,
   STATE_SERVER_CONFIRM_PATTERN,
   STATE_SERVER_WAIT_FOR_GUESSES,
@@ -150,7 +155,7 @@ void setup() {
   #else
   Mesh.subscribe("game-started", processGameStartedEvent);
   Mesh.subscribe("guess-submission-result", processGuessSubmissionResult);
-  //TODO: Mesh.subscribe("game-complete", processGameCompleteEvent);
+  Mesh.subscribe("game-complete", processGameCompleteEvent);
   #endif
   
   // Indicate Setup is complete (with light pattern)
@@ -304,11 +309,6 @@ void updateGameState()
       changeColorButtonClicked = false;
       changeIndexButtonClicked = false;
 
-      // TODO: Wait for the 'game start' mesh event
-      //if (gameStartTimer >= gameStartTime) {
-      //  currentGameState = STATE_GUESS_START;
-      //}
-
       break;
 
     case STATE_GUESS_START:
@@ -345,7 +345,12 @@ void updateGameState()
       break;
 
     case STATE_CONFIRM_GUESS:
-      if (changeColorButtonClicked) {
+      if (changeColorButtonClicked && changeIndexButtonClicked && numberOfGuesses > 0) {
+        changeColorButtonClicked = false; // cancel any click
+        changeIndexButtonClicked = false;
+        currentGameState = STATE_SHOW_GUESS_RESULT;
+      }
+      else if (changeColorButtonClicked) {
         changeColorButtonClicked = false;
 
         // move back to guess set mode
@@ -371,10 +376,24 @@ void updateGameState()
       break;
 
     case STATE_SHOW_GUESS_RESULT:
-      // TODO: Handle when the user clicks either button to move back to
-      // TODO: state STATE_CONFIRM_GUESS, this shows the user what they
-      // TODO: just submitted...
-      changeColorButtonClicked = false; // replace these with something useful
+      // Handle when the user clicks either button to move back to
+      // state STATE_CONFIRM_GUESS, this shows the user what they
+      // just submitted...
+      if (changeColorButtonClicked || changeIndexButtonClicked) {
+        changeColorButtonClicked = false;
+        changeIndexButtonClicked = false;
+
+        currentGameState = STATE_CONFIRM_GUESS;
+      }
+
+      break;
+
+    case STATE_GAME_COMPLETE:
+    case STATE_GAME_COMPLETE_WINNER:
+      // TODO: We should track that the game finished so we can switch amongst our last guess and graded result
+
+      // Nothing to do here... we're just waiting for the server...
+      changeColorButtonClicked = false; // cancel any click
       changeIndexButtonClicked = false;
 
       break;
@@ -407,6 +426,7 @@ void renderGameState() {
   switch (currentGameState) {
     case STATE_GAME_START:
     case STATE_SERVER_GAME_COMPLETE:
+    case STATE_GAME_COMPLETE_WINNER:
       // Taste the rainbow while you wait...
       rainbow(50);
       break;
@@ -417,7 +437,7 @@ void renderGameState() {
     case STATE_SERVER_SET_PATTERN:
     case STATE_SERVER_CONFIRM_PATTERN:
     case STATE_SERVER_SHOW_WIN_PATTERN:
-      // These two states are rendered identically
+      // These states are rendered identically
       for(int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
         uint32_t currentGuessColor = currentGuessColors[i] == PEG_NONE ? COLOR_BLACK : pegColors[currentGuessColors[i]];
         if (currentGameState == STATE_SERVER_CONFIRM_PATTERN || currentGameState == STATE_CONFIRM_GUESS || i == currentGuessIndex) {
@@ -436,11 +456,37 @@ void renderGameState() {
       break;
 
     case STATE_SUBMIT_GUESS:
+    {
       // TODO: Some unique rendering to indicate that we're waiting for the server's response
-      break;
+      // Now dim the full on value based on what part of the 'cycle' we're in
+      int blinkIndex = blinkTimer % BLINK_CYCLE_TIME;
+      int blinkSweetSpot = BLINK_CYCLE_TIME / MAX_GUESS_ELEMENTS;
+      int blinkDimCycle = BLINK_CYCLE_TIME / MAX_GUESS_ELEMENTS / 3;
 
+      for (int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
+        int sweetSpot = i * blinkSweetSpot;
+        int minSweetDim = sweetSpot - blinkDimCycle;
+        int maxSweetDim = sweetSpot + blinkDimCycle;
+
+        float indexLevel = blinkIndex >= minSweetDim && blinkIndex <= maxSweetDim
+                         ? abs(sweetSpot - blinkIndex) / (float)blinkDimCycle
+                         : 0.0;
+        strip.setPixelColor(i, PXDIM(PXRED(COLOR_WHITE), indexLevel), PXDIM(PXGREEN(COLOR_WHITE), indexLevel), PXDIM(PXBLUE(COLOR_WHITE), indexLevel));
+      }
+      strip.show();
+
+      break;
+    }
+    
     case STATE_SHOW_GUESS_RESULT:
-      // TODO: Light up the peg array with red (match color+pos) and white (match color) pegs
+    case STATE_GAME_COMPLETE:
+      // Show our latest guess result
+      for(int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
+        uint32_t currentResultColor = currentGuessResult[i];
+        strip.setPixelColor(i, PXRED(currentResultColor), PXGREEN(currentResultColor), PXBLUE(currentResultColor));
+      }
+      strip.show();
+
       break;
 
   }
@@ -526,7 +572,7 @@ void processGameSubmissionEvent(const char *event, const char *data)
 void processGameStartedEvent(const char *event, const char *data)
 {
   // Easy-peasy, just switch to our new state
-  if (currentGameState == STATE_GAME_START) {
+  if (currentGameState == STATE_GAME_START || currentGameState == STATE_GAME_COMPLETE || currentGameState == STATE_GAME_COMPLETE_WINNER) {
     currentGameState = STATE_GUESS_START;
   }
 
@@ -537,11 +583,43 @@ void processGameStartedEvent(const char *event, const char *data)
 void processGuessSubmissionResult(const char *event, const char *data)
 {
   // Do we care about this event?
-  if (((String)data).startsWith(System.deviceID())) {
-    // yup, this is for us
-    // TODO: Store most recent guess result
-    // TODO: switch to game mode 'STATE_SHOW_GUESS_RESULT'
+  String eventData = (String)data;
+  if (eventData.startsWith(System.deviceID())) {
+    // yup, this is for us, strip off the submitter information
+    eventData = eventData.substring(eventData.indexOf("::") + 2);
+    if (eventData.equalsIgnoreCase("winner")) {
+      currentGameState = STATE_GAME_COMPLETE_WINNER;
+    }
+    else {
+      // Store most recent guess result
+      int fullMatches = eventData.substring(0, 1).toInt();
+      int colorMatches = eventData.substring(2, 1).toInt();
+      for(int i = 0; i < MAX_GUESS_ELEMENTS; i++) {
+        if (i < fullMatches) {
+          currentGuessResult[i] = COLOR_RED;
+        }
+        else if (i < (fullMatches + colorMatches)) {
+          currentGuessResult[i] = COLOR_WHITE;
+        }
+        else {
+          currentGuessResult[i] = COLOR_BLACK;
+        }
+      }
+
+      // switch to game mode 'STATE_SHOW_GUESS_RESULT'
+      currentGameState = STATE_SHOW_GUESS_RESULT;
+    }
   }
+  else if (eventData.endsWith("winner")) {
+      // Someone else won, let's end our game
+      currentGameState = STATE_GAME_COMPLETE;
+  }
+}
+
+void processGameCompleteEvent(const char *event, const char *data)
+{
+    // The game is done (assume we didn't win if we're not already set as the winner)
+    currentGameState = currentGameState != STATE_GAME_COMPLETE_WINNER ? STATE_GAME_COMPLETE : STATE_GAME_COMPLETE_WINNER;
 }
 
 int rainbow_step = 0;
